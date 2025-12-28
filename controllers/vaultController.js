@@ -107,6 +107,19 @@ export const addParticipant = async (req, res) => {
 
     await vault.save();
 
+    // Audit log
+    await AuditLog.create({
+      user: req.user._id,
+      action: "Added Participant",
+      details: { 
+        vaultId: vault._id,
+        vaultName: vault.title,
+        participantEmail: participant.email,
+        participantName: `${participant.firstName} ${participant.lastName}`,
+        role: role
+      },
+    });
+
     return res.status(200).json({ message: "Participant added successfully", vault });
   } catch (err) {
     console.error("Error adding participant:", err);
@@ -126,10 +139,31 @@ export const removeParticipant = async (req, res) => {
       return res.status(403).json({ message: "Only owner can remove participants" });
     }
 
+    // Find participant info before removing for audit log
+    const participantToRemove = vault.participants.find(
+      (p) => p.participantId.toString() === participantId
+    );
+
     vault.participants = vault.participants.filter(
       (p) => p.participantId.toString() !== participantId
     );
     await vault.save();
+
+    // Audit log
+    if (participantToRemove) {
+      const participantUser = await User.findById(participantId);
+      await AuditLog.create({
+        user: req.user._id,
+        action: "Removed Participant",
+        details: { 
+          vaultId: vault._id,
+          vaultName: vault.title,
+          participantEmail: participantUser?.email,
+          participantName: participantUser ? `${participantUser.firstName} ${participantUser.lastName}` : "Unknown",
+          role: participantToRemove.role
+        },
+      });
+    }
 
     res.json({ message: "Participant removed successfully", vault });
   } catch (err) {
@@ -213,6 +247,16 @@ export const deleteVault = async (req, res) => {
     // Check if the user is the owner
     if (vault.ownerId.toString() !== req.user._id.toString())
       return res.status(403).json({ message: "Only vault owner can delete this vault" });
+
+    // Audit log before deletion
+    await AuditLog.create({
+      user: req.user._id,
+      action: "Deleted Vault",
+      details: { 
+        vaultId: vault._id,
+        vaultName: vault.title,
+      },
+    });
 
     // Delete associated ruleset and vault
     if (vault.ruleSetId) await RuleSet.findByIdAndDelete(vault.ruleSetId);

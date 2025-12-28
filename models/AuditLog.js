@@ -2,13 +2,16 @@ import mongoose from "mongoose";
 import crypto from "crypto";
 
 const auditLogSchema = new mongoose.Schema({
-  actorId: {
+  user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
   },
   action: {
     type: String,
     required: true,
+  },
+  details: {
+    type: mongoose.Schema.Types.Mixed,
   },
   timestamp: {
     type: Date,
@@ -24,7 +27,7 @@ const auditLogSchema = new mongoose.Schema({
 
 // Optional: maintain hash-chain for tamper resistance
 auditLogSchema.pre("save", function (next) {
-  const data = `${this.actorId || ""}${this.action}${this.timestamp}${this.previousHash || ""}`;
+  const data = `${this.user || ""}${this.action}${this.timestamp}${this.previousHash || ""}`;
   this.hash = crypto.createHash("sha256").update(data).digest("hex");
   next();
 });

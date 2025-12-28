@@ -54,9 +54,14 @@ export const uploadEncryptedFile = async (req, res) => {
 
     // Audit log
     await AuditLog.create({
-      actorId: req.user._id,
-      action: `encrypted_file_uploaded to vault ${vaultId}`,
-      details: { itemId: item._id, fileName: metadata?.name },
+      user: req.user._id,
+      action: "Uploaded File",
+      details: { 
+        vaultId: vault._id, 
+        vaultName: vault.title,
+        itemId: item._id, 
+        fileName: metadata?.name 
+      },
     });
 
     return res.status(201).json({
