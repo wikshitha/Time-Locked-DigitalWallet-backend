@@ -424,6 +424,12 @@ export const getVaultReleaseStatus = async (req, res) => {
     const inGracePeriod = release.isInGracePeriod();
     const inTimeLock = release.isInTimeLock();
 
+    // Check if current user has already confirmed this release
+    const userConfirmation = await Confirmation.findOne({
+      releaseId: release._id,
+      participantId: req.user._id,
+    });
+
     res.json({
       hasActiveRelease: true,
       isReleased,
@@ -435,6 +441,8 @@ export const getVaultReleaseStatus = async (req, res) => {
       approvalsReceived: release.approvalsReceived,
       approvalsNeeded: release.approvalsNeeded,
       releaseId: release._id,
+      userHasConfirmed: !!userConfirmation,
+      userConfirmationStatus: userConfirmation?.status || null,
     });
   } catch (err) {
     console.error("Error getting vault release status:", err);

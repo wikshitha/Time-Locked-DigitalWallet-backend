@@ -182,13 +182,14 @@ export const getVaultById = async (req, res) => {
         select: "metadata fileUrl encKey createdAt",
       })
       .populate("ruleSetId")
+      .populate("ownerId", "firstName lastName email")
       .populate("participants.participantId", "firstName lastName email role");
 
     if (!vault) return res.status(404).json({ message: "Vault not found" });
 
     // Access control: only owner or participant can view
     const userId = req.user._id.toString();
-    const isOwner = vault.ownerId.toString() === userId;
+    const isOwner = vault.ownerId._id.toString() === userId;
     const participant = vault.participants.find(
       (p) => p.participantId && p.participantId._id.toString() === userId
     );
@@ -201,7 +202,7 @@ export const getVaultById = async (req, res) => {
     let canAccessFiles = isOwner; // Owner can always access
     let items = vault.items || [];
 
-    // For participants (beneficiary, witness, shared), check release status
+    // For participants, check release status and role
     if (!isOwner && isParticipant) {
       const Release = (await import("../models/Release.js")).default;
       
@@ -211,11 +212,13 @@ export const getVaultById = async (req, res) => {
         status: { $in: ["pending", "in_progress", "approved", "released"] }
       }).sort({ triggeredAt: -1 });
 
-      // Participants can only access files if release is fully complete
-      if (release && release.isFullyReleased()) {
+      // Only beneficiaries can access files after release is fully complete
+      // Witnesses and shared users cannot decrypt/download files
+      if (release && release.isFullyReleased() && participant.role === "beneficiary") {
         canAccessFiles = true;
       } else {
-        // Hide files from participants until release is complete
+        // Hide files from all participants until release is complete
+        // And always hide files from witnesses and shared users
         items = [];
       }
     }
