@@ -12,7 +12,7 @@ const releaseSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ["pending", "in_progress", "approved", "rejected", "released"],
+    enum: ["pending", "in_progress", "approved", "rejected", "revoked", "released"],
     default: "pending",
   },
   gracePeriodEnd: {

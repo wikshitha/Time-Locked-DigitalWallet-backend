@@ -364,37 +364,86 @@ export const revokeRelease = async (req, res) => {
   try {
     const { releaseId, reason } = req.body;
 
-    const release = await Release.findById(releaseId).populate("vaultId");
+    const release = await Release.findById(releaseId).populate({
+      path: "vaultId",
+      populate: { path: "participants.participantId" }
+    });
+    
     if (!release) return res.status(404).json({ message: "Release not found" });
 
     if (release.status === "released") {
       return res.status(400).json({ message: "Cannot revoke a released vault" });
     }
 
-    release.status = "rejected"; // mark as revoked
+    const vault = release.vaultId;
+    if (!vault) return res.status(404).json({ message: "Vault not found" });
+
+    // Verify the user is the vault owner
+    if (vault.ownerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: "Only the vault owner can revoke a release" });
+    }
+
+    // Only allow revoke during grace period (status: "pending")
+    if (release.status !== "pending") {
+      return res.status(400).json({ 
+        message: `Release can only be revoked during grace period. Current status: ${release.status}` 
+      });
+    }
+
+    // Mark release as rejected/revoked
+    release.status = "revoked";
     release.completedAt = new Date();
     await release.save();
 
+    // CRITICAL: Reset vault's releaseTriggered flag so inactivity watcher can trigger again
+    vault.releaseTriggered = false;
+    await vault.save();
+
+    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`🚫 OWNER REVOKED RELEASE`);
+    console.log(`   👤 Owner: ${req.user.email}`);
+    console.log(`   📋 Release ID: ${release._id}`);
+    console.log(`   🏛️  Vault: "${vault.title}"`);
+    console.log(`   🔄 Status Changed: pending → revoked`);
+    console.log(`   `);
+    console.log(`   ♻️  SYSTEM RESET:`);
+    console.log(`   → Vault flagged for inactivity monitoring again`);
+    console.log(`   → If owner remains inactive, a new release will be triggered`);
+    console.log(`   → Grace period will restart from the beginning`);
+    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
     // Notify participants
-    const vault = release.vaultId;
-    if (vault?.participants) {
+    if (vault.participants) {
       for (const p of vault.participants) {
-        await sendEmail(
-          p.email,
-          "Vault Release Aborted",
-          `The release of vault "${vault.name}" has been aborted by the owner. Reason: ${reason || "No reason provided"}`
-        );
+        if (p.participantId && p.participantId.email) {
+          const role = p.role;
+          await sendEmail(
+            p.participantId.email,
+            "Vault Release Revoked by Owner",
+            `The owner has revoked the release for vault "${vault.title}". Reason: ${reason || "No reason provided"}.\n\nThe system will continue monitoring for owner inactivity. If the owner remains inactive, a new release will be triggered.`
+          );
+        }
       }
     }
 
     // Audit log
     await AuditLog.create({
-      actorId: req.user._id,
-      action: `owner_revoked_release_${release._id}`,
+      user: req.user._id,
+      action: "Owner Revoked Release",
+      details: { 
+        releaseId: release._id, 
+        vaultId: vault._id,
+        reason: reason || "No reason provided",
+        message: "Release revoked during grace period. Vault reset for inactivity monitoring."
+      },
     });
 
-    res.status(200).json({ message: "Release successfully revoked", release });
+    res.status(200).json({ 
+      message: "Release successfully revoked. System will continue monitoring for inactivity.", 
+      release 
+    });
   } catch (err) {
+    console.error("Error revoking release:", err);
     res.status(500).json({ message: "Error revoking release", error: err.message });
   }
 };
