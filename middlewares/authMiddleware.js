@@ -11,10 +11,28 @@ export const protect = async (req, res, next) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       req.user = await User.findById(decoded.id).select("-password");
       
-      // Update last active timestamp for the authenticated user
-      // This updates on ANY activity - login, vault access, file operations, etc.
-      // The inactivity watcher checks if the VAULT OWNER is inactive
-      if (req.user) {
+      // Define passive/read-only operations that don't count as activity
+      const passiveEndpoints = [
+        '/api/vaults',           // GET requests to view vaults
+        '/api/releases',         // GET requests to view releases
+        '/api/auditlogs',        // GET requests to view logs
+        '/api/inactivity',       // GET requests to check inactivity status
+      ];
+      
+      const isPassiveRequest = req.method === 'GET' && 
+        passiveEndpoints.some(endpoint => req.path.startsWith(endpoint));
+      
+      // Update lastActiveAt for:
+      // 1. Any non-GET request (POST, PUT, DELETE, etc.) - these are active user actions
+      // 2. Any request if user doesn't have lastActiveAt set (first time after login)
+      // 3. /api/auth/me endpoint (to ensure activity is tracked after fresh login)
+      const shouldUpdateActivity = req.user && (
+        !isPassiveRequest ||                           // Active operations (POST, PUT, DELETE)
+        !req.user.lastActiveAt ||                       // First request, ensure it's set
+        req.path === '/api/auth/me'                     // Auth check after login
+      );
+      
+      if (shouldUpdateActivity) {
         await User.findByIdAndUpdate(req.user._id, { lastActiveAt: new Date() });
       }
       
